@@ -80,4 +80,52 @@ def check_coin(symbol):
                 "change": (close - float(last[1])) / float(last[1]) * 100,
                 "entry": entry, "stop": stop, "target": target,
                 "risk_pct": risk / entry * 100,
-                "reward_pct": (target - entry) /
+                "reward_pct": (target - entry) / entry * 100,
+            }
+    except Exception as e:
+        print(f"{pair}: error {e}")
+    return None
+
+
+def send_telegram(text):
+    r = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": text,
+              "parse_mode": "HTML", "disable_web_page_preview": True},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        print("Telegram error:", r.text)
+
+
+def main():
+    if SEND_TEST_MESSAGE:
+        send_telegram("✅ Alert bot is connected.")
+
+    symbols = get_top_coins()
+    print(f"Scanning {len(symbols)} coins on {INTERVAL} candles...")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = [r for r in pool.map(check_coin, symbols) if r]
+
+    print(f"{len(results)} signal(s) found")
+    for s in sorted(results, key=lambda x: -x["vol_ratio"]):
+        base = s["pair"].replace("USDT", "")
+        msg = (
+            f"🚀 <b>{base}</b> breakout ({INTERVAL})\n"
+            f"Price: ${s['close']:,.6g} ({s['change']:+.2f}% this candle)\n"
+            f"Broke {LOOKBACK}-candle high: ${s['prev_high']:,.6g}\n"
+            f"Volume: {s['vol_ratio']:.1f}x average\n\n"
+            f"Entry: ${s['entry']:,.6g}\n"
+            f"Stop loss: ${s['stop']:,.6g} (-{s['risk_pct']:.1f}%)\n"
+            f"Target: ${s['target']:,.6g} (+{s['reward_pct']:.1f}%)\n"
+            f"Reward:Risk = {REWARD_RISK:.0f}:1\n\n"
+            f"Not financial advice. Rule-based levels only.\n"
+            f"https://www.binance.com/en/trade/{base}_USDT"
+        )
+        send_telegram(msg)
+        time.sleep(0.5)  # stay under Telegram rate limits
+
+
+if __name__ == "__main__":
+    main()
