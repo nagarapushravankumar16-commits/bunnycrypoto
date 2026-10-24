@@ -22,8 +22,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PASTE_YOUR_CHAT_ID_HERE")
 
 # ---- Settings you can tweak ----
 INTERVAL = "1h"        # candle size: 15m, 1h, 4h, 1d
-LOOKBACK = 20          # candles used for the breakout high + average volume
-VOLUME_MULT = 2.0      # volume must be at least this many times the average
+LOOKBACK = 10          # candles used for the breakout high + average volume
+VOLUME_MULT = 1.5      # volume must be at least this many times the average
 TOP_N = 100            # how many top coins to scan
 SEND_TEST_MESSAGE = False  # set True once to confirm the bot can message you
 REWARD_RISK = 2.0      # target = entry + this many times your risk
