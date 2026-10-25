@@ -21,12 +21,12 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PASTE_YOUR_CHAT_ID_HERE")
 # ============================================================================
 
 # ---- Settings you can tweak ----
-INTERVAL = "1h"        # candle size: 15m, 1h, 4h, 1d
+INTERVAL = "15m"       # candle size: 15m, 1h, 4h, 1d
 LOOKBACK = 10          # candles used for the breakout high + average volume
 VOLUME_MULT = 1.5      # volume must be at least this many times the average
 TOP_N = 100            # how many top coins to scan
 SEND_TEST_MESSAGE = False  # set True once to confirm the bot can message you
-REWARD_RISK = 2.0      # target = entry + this many times your risk
+REWARD_RISK = 1.5      # target = entry + this many times your risk
 STOP_BUFFER = 0.002    # stop sits 0.2% below the stop level (breathing room)
 
 BINANCE = "https://data-api.binance.vision/api/v3/klines"  # public, no key
@@ -112,14 +112,14 @@ def main():
     for s in sorted(results, key=lambda x: -x["vol_ratio"]):
         base = s["pair"].replace("USDT", "")
         msg = (
-            f"🚀 <b>{base}</b> breakout ({INTERVAL})\n"
+            f"🚀 {base} breakout ({INTERVAL})\n"
             f"Price: ${s['close']:,.6g} ({s['change']:+.2f}% this candle)\n"
             f"Broke {LOOKBACK}-candle high: ${s['prev_high']:,.6g}\n"
             f"Volume: {s['vol_ratio']:.1f}x average\n\n"
             f"Entry: ${s['entry']:,.6g}\n"
             f"Stop loss: ${s['stop']:,.6g} (-{s['risk_pct']:.1f}%)\n"
             f"Target: ${s['target']:,.6g} (+{s['reward_pct']:.1f}%)\n"
-            f"Reward:Risk = {REWARD_RISK:.0f}:1\n\n"
+            f"Reward:Risk = {REWARD_RISK:.1f}:1\n\n"
             f"Not financial advice. Rule-based levels only.\n"
             f"https://www.binance.com/en/trade/{base}_USDT"
         )
