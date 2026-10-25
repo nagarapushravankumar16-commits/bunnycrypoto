@@ -29,6 +29,15 @@ SEND_TEST_MESSAGE = False  # set True once to confirm the bot can message you
 REWARD_RISK = 1.5      # target = entry + this many times your risk
 STOP_BUFFER = 0.002    # stop sits 0.2% below the stop level (breathing room)
 
+# ---- Fee estimates (percent per side, EDIT to match your own fee tier) ----
+# Check the real numbers on each exchange's fee page; these are placeholders.
+BINANCE_FEE_PCT = 0.10    # Binance spot, per buy or per sell
+COINDCX_FEE_PCT = 0.20    # CoinDCX spot, per buy or per sell (before GST)
+GST_ON_FEE = 0.18         # India adds 18% GST on the trading fee
+INDIA_TDS_PCT = 1.0       # 1% TDS on the sell value (CoinDCX / Indian exchanges)
+FALLBACK_USDT_INR = 90.0  # used only if the live USDT->INR rate cannot be fetched
+TRADE_SIZE_INR = 10000    # example trade size used to show costs in rupees
+
 BINANCE = "https://data-api.binance.vision/api/v3/klines"  # public, no key
 COINGECKO = "https://api.coingecko.com/api/v3/coins/markets"
 SKIP = {"usdt", "usdc", "dai", "fdusd", "tusd", "usde", "usds", "usdd", "pyusd",
@@ -44,6 +53,20 @@ def get_top_coins():
     )
     r.raise_for_status()
     return [c["symbol"].upper() for c in r.json() if c["symbol"].lower() not in SKIP]
+
+
+def get_usdt_inr():
+    """Live USDT -> INR rate from CoinGecko. Falls back to a fixed rate if it fails."""
+    try:
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": "tether", "vs_currencies": "inr"}, timeout=15,
+        )
+        r.raise_for_status()
+        return float(r.json()["tether"]["inr"])
+    except Exception as e:
+        print("INR rate error, using fallback:", e)
+        return FALLBACK_USDT_INR
 
 
 def check_coin(symbol):
@@ -87,6 +110,35 @@ def check_coin(symbol):
     return None
 
 
+def fee_line(s, fee_pct, gst=0.0, tds_pct=0.0):
+    """Round-trip cost and net profit % if the target is hit, on a 100-unit trade."""
+    buy = 100.0
+    sell = buy * (1 + s["reward_pct"] / 100)
+    fee_rate = fee_pct / 100 * (1 + gst)
+    fees = buy * fee_rate + sell * fee_rate
+    tds = sell * tds_pct / 100
+    net_target = (sell - buy) - fees - tds
+    stop_sell = buy * (1 - s["risk_pct"] / 100)
+    fees_stop = buy * fee_rate + stop_sell * fee_rate
+    tds_stop = stop_sell * tds_pct / 100
+    net_stop = (stop_sell - buy) - fees_stop - tds_stop
+    return fees + tds, net_target, net_stop
+
+
+def fee_text(s, inr):
+    b_cost, b_win, b_loss = fee_line(s, BINANCE_FEE_PCT)
+    c_cost, c_win, c_loss = fee_line(s, COINDCX_FEE_PCT, GST_ON_FEE, INDIA_TDS_PCT)
+    k = TRADE_SIZE_INR / 100.0  # numbers above are per 100, scale to trade size
+    return (
+        f"<b>Estimated costs on \u20b9{TRADE_SIZE_INR:,} traded</b>\n"
+        f"Binance ({BINANCE_FEE_PCT}%/side): cost \u20b9{b_cost*k:,.0f}, "
+        f"net if target \u20b9{b_win*k:+,.0f}, net if stop \u20b9{b_loss*k:+,.0f}\n"
+        f"CoinDCX ({COINDCX_FEE_PCT}%/side + GST + {INDIA_TDS_PCT:g}% TDS): "
+        f"cost \u20b9{c_cost*k:,.0f}, net if target \u20b9{c_win*k:+,.0f}, "
+        f"net if stop \u20b9{c_loss*k:+,.0f}"
+    )
+
+
 def send_telegram(text):
     r = requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
@@ -109,17 +161,20 @@ def main():
         results = [r for r in pool.map(check_coin, symbols) if r]
 
     print(f"{len(results)} signal(s) found")
+    inr = get_usdt_inr() if results else FALLBACK_USDT_INR
     for s in sorted(results, key=lambda x: -x["vol_ratio"]):
         base = s["pair"].replace("USDT", "")
         msg = (
-            f"🚀 {base} breakout ({INTERVAL})\n"
-            f"Price: ${s['close']:,.6g} ({s['change']:+.2f}% this candle)\n"
-            f"Broke {LOOKBACK}-candle high: ${s['prev_high']:,.6g}\n"
+            f"\U0001F680 <b>{base}</b> breakout ({INTERVAL})\n"
+            f"Price: \u20b9{s['close']*inr:,.6g} (${s['close']:,.6g}, {s['change']:+.2f}% this candle)\n"
+            f"Broke {LOOKBACK}-candle high: \u20b9{s['prev_high']*inr:,.6g}\n"
             f"Volume: {s['vol_ratio']:.1f}x average\n\n"
-            f"Entry: ${s['entry']:,.6g}\n"
-            f"Stop loss: ${s['stop']:,.6g} (-{s['risk_pct']:.1f}%)\n"
-            f"Target: ${s['target']:,.6g} (+{s['reward_pct']:.1f}%)\n"
+            f"Entry: \u20b9{s['entry']*inr:,.6g}\n"
+            f"Stop loss: \u20b9{s['stop']*inr:,.6g} (-{s['risk_pct']:.1f}%)\n"
+            f"Target: \u20b9{s['target']*inr:,.6g} (+{s['reward_pct']:.1f}%)\n"
             f"Reward:Risk = {REWARD_RISK:.1f}:1\n\n"
+            f"{fee_text(s, inr)}\n\n"
+            f"Rupee levels use USDT/INR \u20b9{inr:,.2f}. Check the live INR price on CoinDCX before trading.\n"
             f"Not financial advice. Rule-based levels only.\n"
             f"https://www.binance.com/en/trade/{base}_USDT"
         )
